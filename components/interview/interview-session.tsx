@@ -329,6 +329,20 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
 
     const proceedToEvaluate = async () => {
       try {
+        const questionsToSend = typeof finalQuestionCount === 'number' ? finalQuestionCount : questionCount
+
+        // Save metrics to database
+        if (sessionId) {
+          try {
+            await supabase.from("interview_sessions").update({
+              question_count: questionsToSend,
+              duration: elapsedTime
+            }).eq("id", sessionId)
+          } catch (e) {
+            console.warn("Failed to save metrics:", e)
+          }
+        }
+
         const response = await fetch("/api/ai/evaluate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -337,7 +351,6 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
 
         if (!response.ok) throw new Error("Evaluation failed")
 
-        const questionsToSend = typeof finalQuestionCount === 'number' ? finalQuestionCount : questionCount
         router.push(`/dashboard/results?sessionId=${sessionId}&questions=${questionsToSend}&time=${elapsedTime}&mode=${mode}`)
       } catch (error) {
         console.error("End interview error:", error)
