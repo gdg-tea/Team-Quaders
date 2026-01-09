@@ -162,7 +162,7 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
     }
     // Cast window to any to avoid TS errors
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      alert("Speech not supported in this browser.")
+      alert("Speech not supported in this browser. Please use Chrome, Edge, or Safari.")
       return
     }
     
@@ -172,21 +172,42 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
     // keep listening across short pauses; we'll restart onend if needed
     recognitionRef.current.continuous = true
     recognitionRef.current.interimResults = true
+    recognitionRef.current.maxAlternatives = 1
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error)
+      if (event.error === 'network') {
+        toast({ title: "Network Error", description: "Check your internet connection", variant: "destructive" })
+      } else if (event.error === 'no-speech') {
+        // User didn't speak, but don't show error - just continue listening
+      } else {
+        toast({ title: "Mic Error", description: `Error: ${event.error}`, variant: "destructive" })
+      }
+    }
 
     recognitionRef.current.onresult = (event: any) => {
+      let interimTranscript = ""
       let finalTranscript = ""
+      
+      // Get all accumulated final transcripts up to the current point
+      for (let i = 0; i < event.resultIndex; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + " "
+        }
+      }
+      
+      // Get the current interim result (if any)
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript
+          finalTranscript += event.results[i][0].transcript + " "
         } else {
-          setCurrentTranscript(event.results[i][0].transcript)
+          interimTranscript += event.results[i][0].transcript
         }
       }
 
-      // append final pieces to currentTranscript but do NOT auto-submit
-      if (finalTranscript) {
-        setCurrentTranscript((prev) => (prev ? prev + " " + finalTranscript : finalTranscript).trim())
-      }
+      // Combine final and interim for display
+      const displayText = (finalTranscript + interimTranscript).trim()
+      setCurrentTranscript(displayText)
     }
 
     // restart recognition on end to survive short pauses, unless user stopped
@@ -205,12 +226,17 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
     }
 
     // start
-    recognitionRef.current.start()
-    // clear any previous interim transcript and begin
-    setCurrentTranscript("")
-    setIsListening(true)
-    keepListeningRef.current = true
-  }, [messages, questionCount]) // eslint-disable-line
+    try {
+      recognitionRef.current.start()
+      // clear any previous interim transcript and begin
+      setCurrentTranscript("")
+      setIsListening(true)
+      keepListeningRef.current = true
+    } catch (e) {
+      console.error("Error starting speech recognition:", e)
+      toast({ title: "Microphone Error", description: "Could not start microphone. Check permissions.", variant: "destructive" })
+    }
+  }, [messages, questionCount, showFinalize, toast]) // eslint-disable-line
 
   const stopListening = (sendTranscript = false) => {
     try {
@@ -414,6 +440,14 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
             </div>
           </div>
         ))}
+        {isListening && currentTranscript && (
+          <div className="flex justify-end">
+            <div className="p-4 rounded-xl max-w-[80%] bg-primary/80 text-primary-foreground">
+              {currentTranscript}
+              <span className="ml-2 animate-pulse">▌</span>
+            </div>
+          </div>
+        )}
         {isLoading && <div className="text-sm text-muted-foreground animate-pulse">AI is thinking...</div>}
         <div ref={messagesEndRef} />
       </div>
@@ -493,7 +527,7 @@ export function InterviewSession({ mode, role, year, subject, difficulty }: Inte
           )}
         </div>
         <p className="text-center mt-2 text-xs text-muted-foreground">
-          {isListening ? "Listening..." : showFinalize ? "Awaiting finalization" : "Tap mic to answer"}
+          {isListening ? `Listening... "${currentTranscript}"` : showFinalize ? "Awaiting finalization" : "Click mic to answer"}
         </p>
       </div>
     </div>
